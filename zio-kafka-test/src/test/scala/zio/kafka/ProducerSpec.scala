@@ -2,10 +2,12 @@ package zio.kafka
 
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.config.TopicConfig
 import zio._
+import zio.kafka.admin.AdminClient.NewTopic
 import zio.kafka.consumer._
 import zio.kafka.producer.TransactionalProducer.{ TransactionLeaked, UserInitiatedAbort }
-import zio.kafka.producer.{ Producer, Transaction, TransactionalProducer }
+import zio.kafka.producer.{ ByteRecord, Producer, Transaction, TransactionalProducer }
 import zio.kafka.serde.Serde
 import zio.kafka.testkit.KafkaTestUtils._
 import zio.kafka.testkit._
@@ -76,6 +78,50 @@ object ProducerSpec extends ZIOSpecDefaultSlf4j with KafkaRandom {
         } yield assertTrue(outcome.length == 2) &&
           assertTrue(record1.nonEmpty) &&
           assertTrue(record2.nonEmpty)
+      },
+      test("a non-empty chunk of records with partial failure") {
+        import Subscription._
+
+        def withConsumer(subscription: Subscription, settings: ConsumerSettings) =
+          Consumer.make(settings).flatMap { c =>
+            c.plainStream(subscription, Serde.string, Serde.string).toQueue()
+          }
+
+        for {
+          compactedTopic <- randomTopic
+          standardTopic  <- randomTopic
+          _ <- withAdmin(
+                 _.createTopic(NewTopic(compactedTopic, 1, 1, Map(TopicConfig.CLEANUP_POLICY_CONFIG -> "compact")))
+               )
+          group  <- randomGroup
+          client <- randomClient
+          key1              = "boo"
+          value1            = "baa"
+          key2: Array[Byte] = null
+          value2            = "boo"
+          key3              = "hello"
+          value3            = "world"
+          chunks = Chunk.fromIterable(
+                     List[ByteRecord](
+                       new ProducerRecord(standardTopic, key1.getBytes, value1.getBytes),
+                       new ProducerRecord(compactedTopic, key2, value2.getBytes),
+                       new ProducerRecord(standardTopic, key3.getBytes, value3.getBytes)
+                     )
+                   )
+          outcome  <- Producer.produceChunkAsyncWithFailures(chunks).flatten
+          settings <- consumerSettings(client, Some(group))
+          recordsConsumed <- ZIO.scoped {
+                               withConsumer(Topics(Set(standardTopic)), settings).flatMap { consumer =>
+                                 consumer.take.flatMap(_.done).mapError(_.getOrElse(new NoSuchElementException))
+                               }
+                             }
+        } yield assertTrue(outcome.length == 3) &&
+          assertTrue(outcome(0).isRight) &&
+          assertTrue(
+            outcome(1).swap.exists(_.getMessage.contains("Compacted topic cannot accept message without key"))
+          ) &&
+          assertTrue(outcome(2).isRight) &&
+          assertTrue(recordsConsumed.length == 2)
       },
       test("an empty chunk of records") {
         val chunks = Chunk.fromIterable(List.empty)

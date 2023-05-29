@@ -95,6 +95,26 @@ trait Producer {
   ): RIO[R, Task[Chunk[RecordMetadata]]]
 
   /**
+   * Produces a chunk of records. The effect returned from this method has two layers and describes the completion of
+   * two actions:
+   *   1. The outer layer describes the enqueueing of all the records to the Producer's internal buffer. 2. The inner
+   *      layer describes receiving an acknowledgement from the broker for the transmission of the records.
+   *
+   * It is possible that for chunks that exceed the producer's internal buffer size, the outer layer will also signal
+   * the transmission of part of the chunk. Regardless, awaiting the inner layer guarantees the transmission of the
+   * entire chunk.
+   *
+   * This variant of `produceChunkAsync` more accurately reflects that individual records within the Chunk can fail to
+   * publish, rather than the failure being at the level of the Chunk.
+   *
+   * This variant does not accept serializers as they may also fail indepenently of each record and this is not
+   * reflected in the return type.
+   */
+  def produceChunkAsyncWithFailures(
+    records: Chunk[ProducerRecord[Array[Byte], Array[Byte]]]
+  ): Task[UIO[Chunk[Either[Throwable, RecordMetadata]]]]
+
+  /**
    * Produces a chunk of records. See [[produceChunkAsync]] for version that allows to avoid round-trip-time penalty for
    * each chunk.
    */
@@ -122,7 +142,7 @@ object Producer {
     p: JProducer[Array[Byte], Array[Byte]],
     producerSettings: ProducerSettings,
     runtime: Runtime[Any],
-    sendQueue: Queue[(Chunk[ByteRecord], Promise[Throwable, Chunk[RecordMetadata]])]
+    sendQueue: Queue[(Chunk[ByteRecord], Promise[Nothing, Chunk[Either[Throwable, RecordMetadata]]])]
   ) extends Producer {
 
     override def produceAsync[R, K, V](
@@ -131,10 +151,10 @@ object Producer {
       valueSerializer: Serializer[R, V]
     ): RIO[R, Task[RecordMetadata]] =
       for {
-        done             <- Promise.make[Throwable, Chunk[RecordMetadata]]
+        done             <- Promise.make[Nothing, Chunk[Either[Throwable, RecordMetadata]]]
         serializedRecord <- serialize(record, keySerializer, valueSerializer)
         _                <- sendQueue.offer((Chunk.single(serializedRecord), done))
-      } yield done.await.map(_.head)
+      } yield done.await.flatMap(result => ZIO.fromEither(result.head))
 
     override def produceChunkAsync[R, K, V](
       records: Chunk[ProducerRecord[K, V]],
@@ -144,9 +164,25 @@ object Producer {
       if (records.isEmpty) ZIO.succeed(ZIO.succeed(Chunk.empty))
       else {
         for {
-          done              <- Promise.make[Throwable, Chunk[RecordMetadata]]
           serializedRecords <- ZIO.foreach(records)(serialize(_, keySerializer, valueSerializer))
-          _                 <- sendQueue.offer((serializedRecords, done))
+          results <- produceChunkAsyncWithFailures(serializedRecords).map(_.flatMap { chunkResults =>
+                       val (errors, success) = chunkResults.partitionMap(identity)
+                       errors.headOption match {
+                         case Some(error) => ZIO.fail(error) // Only the first failure is returned.
+                         case None        => ZIO.succeed(success)
+                       }
+                     })
+        } yield results
+      }
+
+    override def produceChunkAsyncWithFailures(
+      records: Chunk[ByteRecord]
+    ): Task[UIO[Chunk[Either[Throwable, RecordMetadata]]]] =
+      if (records.isEmpty) ZIO.succeed(ZIO.succeed(Chunk.empty))
+      else {
+        for {
+          done <- Promise.make[Nothing, Chunk[Either[Throwable, RecordMetadata]]]
+          _    <- sendQueue.offer((records, done))
         } yield done.await
       }
 
@@ -160,9 +196,10 @@ object Producer {
         .mapZIO { case (serializedRecords, done) =>
           ZIO.attempt {
             val it: Iterator[(ByteRecord, Int)] = serializedRecords.iterator.zipWithIndex
-            val res: Array[RecordMetadata]      = new Array[RecordMetadata](serializedRecords.length)
-            val count: AtomicLong               = new AtomicLong
-            val length                          = serializedRecords.length
+            val res: Array[Either[Throwable, RecordMetadata]] =
+              new Array[Either[Throwable, RecordMetadata]](serializedRecords.length)
+            val count: AtomicLong = new AtomicLong
+            val length            = serializedRecords.length
 
             while (it.hasNext) {
               val (rec, idx): (ByteRecord, Int) = it.next()
@@ -172,16 +209,12 @@ object Producer {
                 (metadata: RecordMetadata, err: Exception) =>
                   Unsafe.unsafe { implicit u =>
                     exec {
-                      if (err != null) {
+                      if (err != null) res(idx) = Left(err)
+                      else res(idx) = Right(metadata)
+
+                      if (count.incrementAndGet == length) {
                         exec {
-                          runtime.unsafe.run(done.fail(err)).getOrThrowFiberFailure()
-                        }
-                      } else {
-                        res(idx) = metadata
-                        if (count.incrementAndGet == length) {
-                          exec {
-                            runtime.unsafe.run(done.succeed(Chunk.fromArray(res))).getOrThrowFiberFailure()
-                          }
+                          runtime.unsafe.run(done.succeed(Chunk.fromArray(res))).getOrThrowFiberFailure(): Unit
                         }
                       }
                     }
@@ -189,7 +222,10 @@ object Producer {
               )
             }
           }
-            .foldCauseZIO(done.failCause, _ => ZIO.unit)
+            .foldCauseZIO(
+              cause => ZIO.dieMessage(cause.toString),
+              _ => ZIO.unit
+            ) // TODO how should these failures be represented
         }
         .runDrain
 
@@ -263,7 +299,9 @@ object Producer {
                      )
       runtime <- ZIO.runtime[Any]
       sendQueue <-
-        Queue.bounded[(Chunk[ByteRecord], Promise[Throwable, Chunk[RecordMetadata]])](settings.sendBufferSize)
+        Queue.bounded[(Chunk[ByteRecord], Promise[Nothing, Chunk[Either[Throwable, RecordMetadata]]])](
+          settings.sendBufferSize
+        )
       producer <- ZIO.acquireRelease(ZIO.succeed(Live(rawProducer, settings, runtime, sendQueue)))(_.close)
       _        <- ZIO.blocking(producer.sendFromQueue).forkScoped
     } yield producer
@@ -335,6 +373,14 @@ object Producer {
     valueSerializer: Serializer[R, V]
   ): RIO[R & Producer, Task[Chunk[RecordMetadata]]] =
     withProducerService(_.produceChunkAsync(records, keySerializer, valueSerializer))
+
+  /**
+   * Accessor method for [[Producer.produceChunkAsyncWithFailures]]]
+   */
+  def produceChunkAsyncWithFailures(
+    records: Chunk[ProducerRecord[Array[Byte], Array[Byte]]]
+  ): RIO[Producer, UIO[Chunk[Either[Throwable, RecordMetadata]]]] =
+    withProducerService(_.produceChunkAsyncWithFailures(records))
 
   /**
    * Accessor method for [[Producer.produceChunk]]
