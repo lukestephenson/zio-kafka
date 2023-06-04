@@ -47,8 +47,8 @@ trait Producer {
   /**
    * Produces a single record. The effect returned from this method has two layers and describes the completion of two
    * actions:
-   *   1. The outer layer describes the enqueueing of the record to the Producer's internal buffer. 2. The inner layer
-   *      describes receiving an acknowledgement from the broker for the transmission of the record.
+   *   1. The outer layer describes the enqueueing of the record to the Producer's internal buffer.
+   *   1. The inner layer describes receiving an acknowledgement from the broker for the transmission of the record.
    *
    * It is usually recommended to not await the inner layer of every individual record, but enqueue a batch of records
    * and await all of their acknowledgements at once. That amortizes the cost of sending requests to Kafka and increases
@@ -63,8 +63,8 @@ trait Producer {
   /**
    * Produces a single record. The effect returned from this method has two layers and describes the completion of two
    * actions:
-   *   1. The outer layer describes the enqueueing of the record to the Producer's internal buffer. 2. The inner layer
-   *      describes receiving an acknowledgement from the broker for the transmission of the record.
+   *   1. The outer layer describes the enqueueing of the record to the Producer's internal buffer.
+   *   1. The inner layer describes receiving an acknowledgement from the broker for the transmission of the record.
    *
    * It is usually recommended to not await the inner layer of every individual record, but enqueue a batch of records
    * and await all of their acknowledgements at once. That amortizes the cost of sending requests to Kafka and increases
@@ -81,8 +81,8 @@ trait Producer {
   /**
    * Produces a chunk of records. The effect returned from this method has two layers and describes the completion of
    * two actions:
-   *   1. The outer layer describes the enqueueing of all the records to the Producer's internal buffer. 2. The inner
-   *      layer describes receiving an acknowledgement from the broker for the transmission of the records.
+   *   1. The outer layer describes the enqueueing of all the records to the Producer's internal buffer.
+   *   1. The inner layer describes receiving an acknowledgement from the broker for the transmission of the records.
    *
    * It is possible that for chunks that exceed the producer's internal buffer size, the outer layer will also signal
    * the transmission of part of the chunk. Regardless, awaiting the inner layer guarantees the transmission of the
@@ -97,8 +97,8 @@ trait Producer {
   /**
    * Produces a chunk of records. The effect returned from this method has two layers and describes the completion of
    * two actions:
-   *   1. The outer layer describes the enqueueing of all the records to the Producer's internal buffer. 2. The inner
-   *      layer describes receiving an acknowledgement from the broker for the transmission of the records.
+   *   1. The outer layer describes the enqueueing of all the records to the Producer's internal buffer.
+   *   1. The inner layer describes receiving an acknowledgement from the broker for the transmission of the records.
    *
    * It is possible that for chunks that exceed the producer's internal buffer size, the outer layer will also signal
    * the transmission of part of the chunk. Regardless, awaiting the inner layer guarantees the transmission of the
@@ -107,12 +107,12 @@ trait Producer {
    * This variant of `produceChunkAsync` more accurately reflects that individual records within the Chunk can fail to
    * publish, rather than the failure being at the level of the Chunk.
    *
-   * This variant does not accept serializers as they may also fail indepenently of each record and this is not
+   * This variant does not accept serializers as they may also fail independently of each record and this is not
    * reflected in the return type.
    */
   def produceChunkAsyncWithFailures(
     records: Chunk[ProducerRecord[Array[Byte], Array[Byte]]]
-  ): Task[UIO[Chunk[Either[Throwable, RecordMetadata]]]]
+  ): UIO[UIO[Chunk[Either[Throwable, RecordMetadata]]]]
 
   /**
    * Produces a chunk of records. See [[produceChunkAsync]] for version that allows to avoid round-trip-time penalty for
@@ -177,7 +177,7 @@ object Producer {
 
     override def produceChunkAsyncWithFailures(
       records: Chunk[ByteRecord]
-    ): Task[UIO[Chunk[Either[Throwable, RecordMetadata]]]] =
+    ): UIO[UIO[Chunk[Either[Throwable, RecordMetadata]]]] =
       if (records.isEmpty) ZIO.succeed(ZIO.succeed(Chunk.empty))
       else {
         for {
