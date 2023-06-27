@@ -19,8 +19,8 @@ Kafka has a mature Java client for producing and consuming events, but it has a 
 In order to use this library, we need to add the following line in our `build.sbt` file:
 
 ```scala
-libraryDependencies += "dev.zio" %% "zio-kafka"         % "2.3.1"
-libraryDependencies += "dev.zio" %% "zio-kafka-testkit" % "2.3.1" % Test
+libraryDependencies += "dev.zio" %% "zio-kafka"         % "2.4.0"
+libraryDependencies += "dev.zio" %% "zio-kafka-testkit" % "2.4.0" % Test
 ```
 
 ## Example
@@ -121,6 +121,8 @@ Here is a partial list of companies using zio-kafka in production.
 Want to see your company here? [Submit a PR](https://github.com/zio/zio-kafka/edit/master/docs/index.md)!
 
 * [Conduktor](https://www.conduktor.io)
+* [KelkooGroup](https://www.kelkoogroup.com)
+* [Rocker](https://rocker.com)
 
 ## Documentation
 
@@ -128,11 +130,11 @@ Learn more on the [ZIO Kafka homepage](https://zio.dev/zio-kafka)!
 
 ## Contributing
 
-For the general guidelines, see ZIO [contributor's guide](https://zio.dev/about/contributing).
+For the general guidelines, see ZIO [contributor's guide](https://zio.dev/contributor-guidelines).
 
 ## Code of Conduct
 
-See the [Code of Conduct](https://zio.dev/about/code-of-conduct)
+See the [Code of Conduct](https://zio.dev/code-of-conduct)
 
 ## Support
 

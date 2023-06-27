@@ -121,7 +121,7 @@ trait Consumer {
   /**
    * See [[Consumer.consumeWith]].
    */
-  def consumeWith[R: Tag, R1: Tag, K, V](
+  def consumeWith[R: EnvironmentTag, R1: EnvironmentTag, K, V](
     subscription: Subscription,
     keyDeserializer: Deserializer[R, K],
     valueDeserializer: Deserializer[R, V],
@@ -158,9 +158,8 @@ object Consumer {
 
   case object RunloopTimeout extends RuntimeException("Timeout in Runloop") with NoStackTrace
 
-  private final case class Live(
+  private final class Live private[Consumer] (
     private val consumer: ConsumerAccess,
-    private val settings: ConsumerSettings,
     private val runloop: Runloop,
     private val subscriptions: Ref.Synchronized[Set[Subscription]],
     private val partitionAssignments: Hub[
@@ -301,7 +300,7 @@ object Consumer {
     override def subscription: Task[Set[String]] =
       consumer.withConsumer(_.subscription().asScala.toSet)
 
-    override def consumeWith[R: Tag, R1: Tag, K, V](
+    override def consumeWith[R: EnvironmentTag, R1: EnvironmentTag, K, V](
       subscription: Subscription,
       keyDeserializer: Deserializer[R, K],
       valueDeserializer: Deserializer[R, V],
@@ -368,7 +367,8 @@ object Consumer {
                    offsetRetrieval = settings.offsetRetrieval,
                    userRebalanceListener = settings.rebalanceListener,
                    restartStreamsOnRebalancing = settings.restartStreamOnRebalancing,
-                   runloopTimeout = settings.runloopTimeout
+                   runloopTimeout = settings.runloopTimeout,
+                   maxPartitionQueueSize = settings.maxPartitionQueueSize
                  )
       subscriptions <- Ref.Synchronized.make(Set.empty[Subscription])
 
@@ -377,7 +377,7 @@ object Consumer {
                                 .map(_.exit)
                                 .flattenExitOption
                                 .toHub(hubCapacity)
-    } yield Live(wrapper, settings, runloop, subscriptions, partitionAssignments)
+    } yield new Live(wrapper, runloop, subscriptions, partitionAssignments)
   }
 
   /**
@@ -515,7 +515,7 @@ object Consumer {
    * @return
    *   Effect that completes with a unit value only when interrupted. May fail when the [[Consumer]] fails.
    */
-  def consumeWith[R: Tag, R1: Tag, K, V](
+  def consumeWith[R: EnvironmentTag, R1: EnvironmentTag, K, V](
     settings: ConsumerSettings,
     subscription: Subscription,
     keyDeserializer: Deserializer[R, K],

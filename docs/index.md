@@ -121,3 +121,6 @@ Here is a partial list of companies using zio-kafka in production.
 Want to see your company here? [Submit a PR](https://github.com/zio/zio-kafka/edit/master/docs/index.md)!
 
 * [Conduktor](https://www.conduktor.io)
+* [KelkooGroup](https://www.kelkoogroup.com)
+* [Rocker](https://rocker.com)
+

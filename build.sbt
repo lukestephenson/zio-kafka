@@ -1,19 +1,22 @@
 import sbt.Def
 
-lazy val kafkaVersion         = "3.4.0"
-lazy val embeddedKafkaVersion = "3.4.0.1" // Should be the same as kafkaVersion, except for the patch part
+lazy val kafkaVersion         = "3.5.0"
+lazy val embeddedKafkaVersion = "3.5.0" // Should be the same as kafkaVersion, except for the patch part
 
 lazy val kafkaClients          = "org.apache.kafka"           % "kafka-clients"           % kafkaVersion
-lazy val scalaCollectionCompat = "org.scala-lang.modules"    %% "scala-collection-compat" % "2.10.0"
-lazy val jacksonDatabind       = "com.fasterxml.jackson.core" % "jackson-databind"        % "2.15.1"
-lazy val logback               = "ch.qos.logback"             % "logback-classic"         % "1.3.7"
+lazy val scalaCollectionCompat = "org.scala-lang.modules"    %% "scala-collection-compat" % "2.11.0"
+lazy val jacksonDatabind       = "com.fasterxml.jackson.core" % "jackson-databind"        % "2.15.2"
+lazy val logback               = "ch.qos.logback"             % "logback-classic"         % "1.3.8"
 
 enablePlugins(ZioSbtEcosystemPlugin, ZioSbtCiPlugin)
 
 inThisBuild(
   List(
     name       := "ZIO Kafka",
-    zioVersion := "2.0.13",
+    zioVersion := "2.0.15",
+    scala212   := "2.12.18",
+    scala213   := "2.13.11",
+    scala3     := "3.3.0",
     crossScalaVersions -= scala211.value,
     ciEnabledBranches        := Seq("master", "series/0.x"),
     useCoursier              := false,
@@ -162,10 +165,10 @@ lazy val zioKafkaExample =
     .settings(run / fork := false)
     .settings(
       libraryDependencies ++= Seq(
-        "dev.zio"                 %% "zio"                % "2.0.13",
-        "dev.zio"                 %% "zio-kafka"          % "2.3.1",
-        "dev.zio"                 %% "zio-kafka-testkit"  % "2.3.1"  % Test,
-        "dev.zio"                 %% "zio-test"           % "2.0.13" % Test,
+        "dev.zio"                 %% "zio"                % "2.0.15",
+        "dev.zio"                 %% "zio-kafka"          % "2.4.0",
+        "dev.zio"                 %% "zio-kafka-testkit"  % "2.4.0"  % Test,
+        "dev.zio"                 %% "zio-test"           % "2.0.15" % Test,
         "ch.qos.logback"           % "logback-classic"    % "1.4.6",
         "dev.zio"                 %% "zio-logging-slf4j2" % "2.1.13",
         "io.github.embeddedkafka" %% "embedded-kafka"     % embeddedKafkaVersion

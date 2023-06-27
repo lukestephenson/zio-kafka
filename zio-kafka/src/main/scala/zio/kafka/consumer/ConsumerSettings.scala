@@ -20,16 +20,25 @@ import zio.kafka.security.KafkaCredentialStore
  *   be much larger than the pollTimeout and the time it takes to process chunks of records. If your consumer is not
  *   subscribed for long periods during its lifetime, this timeout should take that into account as well. When the
  *   timeout expires, the plainStream/partitionedStream/etc will fail with a [[Consumer.RunloopTimeout]].
+ * @param maxPartitionQueueSize
+ *   Maximum number of records to be buffered per partition. This buffer improves throughput and supports varying
+ *   downstream message processing time, while maintaining some backpressure. Large values effectively disable
+ *   backpressure at the cost of high memory usage, low values will effectively disable prefetching in favour of low
+ *   memory consumption. The number of records that is fetched on every poll is controlled by the `max.poll.records`
+ *   setting, the number of records fetched for every partition is somewhere between 0 and `max.poll.records`. A value
+ *   that is a power of 2 offers somewhat better queueing performance. The default value for this parameter is 2 * the
+ *   default `max.poll.records` of 500, rounded to the nearest power of 2.
  */
-case class ConsumerSettings(
+final case class ConsumerSettings(
   bootstrapServers: List[String],
-  properties: Map[String, AnyRef],
-  closeTimeout: Duration,
-  pollTimeout: Duration,
+  properties: Map[String, AnyRef] = Map.empty,
+  closeTimeout: Duration = 30.seconds,
+  pollTimeout: Duration = 50.millis,
   offsetRetrieval: OffsetRetrieval = OffsetRetrieval.Auto(),
   rebalanceListener: RebalanceListener = RebalanceListener.noop,
   restartStreamOnRebalancing: Boolean = false,
-  runloopTimeout: Duration = ConsumerSettings.defaultRunloopTimeout
+  runloopTimeout: Duration = ConsumerSettings.defaultRunloopTimeout,
+  maxPartitionQueueSize: Int = 1024
 ) {
   private[this] def autoOffsetResetConfig: Map[String, String] = offsetRetrieval match {
     case OffsetRetrieval.Auto(reset) => Map(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG -> reset.toConfig)
@@ -86,18 +95,11 @@ case class ConsumerSettings(
 
   def withRunloopTimeout(timeout: Duration): ConsumerSettings =
     copy(runloopTimeout = timeout)
+
+  def withMaxPartitionQueueSize(maxPartitionQueueSize: Int): ConsumerSettings =
+    copy(maxPartitionQueueSize = maxPartitionQueueSize)
 }
 
 object ConsumerSettings {
   val defaultRunloopTimeout: Duration = 4.minutes
-
-  def apply(bootstrapServers: List[String]): ConsumerSettings =
-    new ConsumerSettings(
-      bootstrapServers = bootstrapServers,
-      properties = Map.empty,
-      closeTimeout = 30.seconds,
-      pollTimeout = 50.millis,
-      offsetRetrieval = OffsetRetrieval.Auto(),
-      runloopTimeout = defaultRunloopTimeout
-    )
 }

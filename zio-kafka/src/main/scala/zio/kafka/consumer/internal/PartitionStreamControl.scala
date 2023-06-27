@@ -4,17 +4,16 @@ import org.apache.kafka.common.TopicPartition
 import zio.kafka.consumer.diagnostics.{ DiagnosticEvent, Diagnostics }
 import zio.kafka.consumer.internal.Runloop.ByteArrayCommittableRecord
 import zio.stream.{ Take, ZStream }
-import zio.{ Chunk, LogAnnotation, Promise, Queue, UIO, ZIO }
+import zio.{ Chunk, LogAnnotation, Promise, Queue, Ref, UIO, ZIO }
 
 private[internal] final class PartitionStreamControl private (
   val tp: TopicPartition,
   stream: ZStream[Any, Throwable, ByteArrayCommittableRecord],
   dataQueue: Queue[Take[Throwable, ByteArrayCommittableRecord]],
-  interruptPromise: Promise[Throwable, Unit],
-  completedPromise: Promise[Nothing, Unit]
+  interruptionPromise: Promise[Throwable, Unit],
+  completedPromise: Promise[Nothing, Unit],
+  queueSizeRef: Ref[Int]
 ) {
-
-  private var pollResumedHistory: PollHistory = PollHistory.Empty
 
   private val logAnnotate = ZIO.logAnnotate(
     LogAnnotation("topic", tp.topic()),
@@ -23,16 +22,18 @@ private[internal] final class PartitionStreamControl private (
 
   /** Offer new data for the stream to process. */
   def offerRecords(data: Chunk[ByteArrayCommittableRecord]): ZIO[Any, Nothing, Unit] =
-    dataQueue.offer(Take.chunk(data)).unit
+    queueSizeRef.update(_ + data.size) *> dataQueue.offer(Take.chunk(data)).unit
+
+  def queueSize: UIO[Int] = queueSizeRef.get
 
   /** To be invoked when the partition was lost. */
   def lost(): UIO[Boolean] =
-    interruptPromise.fail(new RuntimeException(s"Partition ${tp.toString} was lost"))
+    interruptionPromise.fail(new RuntimeException(s"Partition ${tp.toString} was lost"))
 
   /** To be invoked when the partition was revoked or otherwise needs to be ended. */
   def end(): ZIO[Any, Nothing, Unit] =
     logAnnotate {
-      ZIO.logTrace(s"Partition ${tp.toString} ending") *>
+      ZIO.logDebug(s"Partition ${tp.toString} ending") *>
         dataQueue.offer(Take.end).unit
     }
 
@@ -46,20 +47,6 @@ private[internal] final class PartitionStreamControl private (
 
   val tpStream: (TopicPartition, ZStream[Any, Throwable, ByteArrayCommittableRecord]) =
     (tp, stream)
-
-  def optimisticResume: Boolean = pollResumedHistory.optimisticResume
-
-  /**
-   * Add a poll event to the poll history.
-   *
-   * Warning: this method is not multi-thread safe.
-   *
-   * @param resumed
-   *   true when this stream was resumed before the poll, false when it was paused
-   */
-  def addPollHistory(resumed: Boolean): Unit =
-    pollResumedHistory = pollResumedHistory.addPollHistory(resumed)
-
 }
 
 private[internal] object PartitionStreamControl {
@@ -68,12 +55,13 @@ private[internal] object PartitionStreamControl {
     tp: TopicPartition,
     commandQueue: Queue[RunloopCommand],
     diagnostics: Diagnostics
-  ): ZIO[Any, Nothing, PartitionStreamControl] =
+  ): UIO[PartitionStreamControl] =
     for {
-      _                   <- ZIO.logTrace(s"Creating partition stream ${tp.toString}")
+      _                   <- ZIO.logDebug(s"Creating partition stream ${tp.toString}")
       interruptionPromise <- Promise.make[Throwable, Unit]
       completedPromise    <- Promise.make[Nothing, Unit]
       dataQueue           <- Queue.unbounded[Take[Throwable, ByteArrayCommittableRecord]]
+      queueSize           <- Ref.make(0)
       requestAndAwaitData =
         for {
           _     <- commandQueue.offer(RunloopCommand.Request(tp))
@@ -94,7 +82,8 @@ private[internal] object PartitionStreamControl {
                    // When no data is available, request more data and await its arrival.
                    dataQueue.takeAll.flatMap(data => if (data.isEmpty) requestAndAwaitData else ZIO.succeed(data))
                  }.flattenTake
+                   .chunksWith(_.tap(records => queueSize.update(_ - records.size)))
                    .interruptWhen(interruptionPromise)
-    } yield new PartitionStreamControl(tp, stream, dataQueue, interruptionPromise, completedPromise)
+    } yield new PartitionStreamControl(tp, stream, dataQueue, interruptionPromise, completedPromise, queueSize)
 
 }
