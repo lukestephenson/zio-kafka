@@ -87,6 +87,19 @@ object ProducerSpec extends ZIOSpecDefaultSlf4j with KafkaRandom {
             c.plainStream(subscription, Serde.string, Serde.string).toQueue()
           }
 
+        def makeChunk(standardTopic: String, compactedTopic: String): Chunk[ByteRecord] = {
+          // Specifically a null key so publishing to compacted topic fails
+          val key2: Array[Byte] = null
+
+          Chunk.fromIterable(
+            List[ByteRecord](
+              new ProducerRecord(standardTopic, "boo".getBytes, "baa".getBytes),
+              new ProducerRecord(compactedTopic, key2, "boo".getBytes),
+              new ProducerRecord(standardTopic, "hello".getBytes, "world".getBytes)
+            )
+          )
+        }
+
         for {
           compactedTopic <- randomTopic
           standardTopic  <- randomTopic
@@ -95,34 +108,21 @@ object ProducerSpec extends ZIOSpecDefaultSlf4j with KafkaRandom {
                )
           group  <- randomGroup
           client <- randomClient
-          key1              = "boo"
-          value1            = "baa"
-          key2: Array[Byte] = null
-          value2            = "boo"
-          key3              = "hello"
-          value3            = "world"
-          chunks = Chunk.fromIterable(
-                     List[ByteRecord](
-                       new ProducerRecord(standardTopic, key1.getBytes, value1.getBytes),
-                       new ProducerRecord(compactedTopic, key2, value2.getBytes),
-                       new ProducerRecord(standardTopic, key3.getBytes, value3.getBytes)
-                     )
-                   )
-          outcome  <- Producer.produceChunkAsyncWithFailures(chunks).flatten
+          chunk = makeChunk(standardTopic, compactedTopic)
+          outcome  <- Producer.produceChunkAsyncWithFailures(chunk).flatten
           settings <- consumerSettings(client, Some(group))
-          _ <- ZIO.scoped {
-                 withConsumer(Topics(Set(standardTopic)), settings).flatMap { consumer =>
-                   consumer.take.flatMap(_.done).mapError(_.getOrElse(new NoSuchElementException))
-                 }
-               }
-        } yield assertTrue(outcome.length == 3)
-//        &&
-//          assertTrue(outcome(0).isRight) &&
-//          assertTrue(
-//            outcome(1).swap.exists(_.getMessage.contains("Compacted topic cannot accept message without key"))
-//          ) &&
-//          assertTrue(outcome(2).isRight) &&
-//          assertTrue(recordsConsumed.length == 2)
+          recordsConsumed <- ZIO.scoped {
+                               withConsumer(Topics(Set(standardTopic)), settings).flatMap { consumer =>
+                                 consumer.take.flatMap(_.done).mapError(_.getOrElse(new NoSuchElementException))
+                               }
+                             }
+        } yield assertTrue(outcome.length == 3) &&
+          assertTrue(outcome(0).isRight) &&
+          assertTrue(
+            outcome(1).swap.exists(_.getMessage.contains("Compacted topic cannot accept message without key"))
+          ) &&
+          assertTrue(outcome(2).isRight) &&
+          assertTrue(recordsConsumed.length == 2)
       },
       test("an empty chunk of records") {
         val chunks = Chunk.fromIterable(List.empty)
