@@ -214,7 +214,7 @@ object Producer {
 
                       if (count.incrementAndGet == length) {
                         exec {
-                          runtime.unsafe.run(done.succeed(Chunk.fromArray(res))).getOrThrowFiberFailure(): Unit
+                          runtime.unsafe.run(done.succeed(Chunk.fromArray(res))).getOrThrowFiberFailure()
                         }
                       }
                     }
