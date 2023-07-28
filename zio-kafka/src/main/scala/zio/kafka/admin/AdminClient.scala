@@ -1216,7 +1216,7 @@ object AdminClient {
       val jn = new JNewTopic(name, numPartitions, replicationFactor)
 
       if (configs.nonEmpty) {
-        jn.configs(configs.asJava)
+        val _ = jn.configs(configs.asJava)
       }
 
       jn
@@ -1225,7 +1225,7 @@ object AdminClient {
 
   final case class NewPartitions(
     totalCount: Int,
-    newAssignments: List[List[Int]] = Nil
+    newAssignments: List[List[Int]] = List.empty
   ) {
     def asJava: JNewPartitions =
       if (newAssignments.nonEmpty)

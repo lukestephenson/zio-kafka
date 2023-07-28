@@ -1,6 +1,6 @@
 import sbt.Def
 
-lazy val kafkaVersion         = "3.5.0"
+lazy val kafkaVersion         = "3.5.1"
 lazy val embeddedKafkaVersion = "3.5.0" // Should be the same as kafkaVersion, except for the patch part
 
 lazy val kafkaClients          = "org.apache.kafka"           % "kafka-clients"           % kafkaVersion
@@ -24,6 +24,10 @@ inThisBuild(
     Test / fork              := true,
     run / fork               := true,
     ciJvmOptions ++= Seq("-Xms6G", "-Xmx6G", "-Xss4M", "-XX:+UseG1GC"),
+    scalafixDependencies ++= List(
+      "com.github.vovapolu"                      %% "scaluzzi" % "0.1.23",
+      "io.github.ghostbuster91.scalafix-unified" %% "unified"  % "0.0.9"
+    ),
     developers := List(
       Developer(
         "iravid",
@@ -166,8 +170,8 @@ lazy val zioKafkaExample =
     .settings(
       libraryDependencies ++= Seq(
         "dev.zio"                 %% "zio"                % "2.0.15",
-        "dev.zio"                 %% "zio-kafka"          % "2.4.0",
-        "dev.zio"                 %% "zio-kafka-testkit"  % "2.4.0"  % Test,
+        "dev.zio"                 %% "zio-kafka"          % "2.4.1",
+        "dev.zio"                 %% "zio-kafka-testkit"  % "2.4.1"  % Test,
         "dev.zio"                 %% "zio-test"           % "2.0.15" % Test,
         "ch.qos.logback"           % "logback-classic"    % "1.4.6",
         "dev.zio"                 %% "zio-logging-slf4j2" % "2.1.13",
