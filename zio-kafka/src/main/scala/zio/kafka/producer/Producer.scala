@@ -297,6 +297,14 @@ object Producer {
     ZIO.serviceWithZIO[Producer](_.produceChunkAsync(records, keySerializer, valueSerializer))
 
   /**
+   * Accessor method for [[Producer.produceChunkAsyncWithFailures]]]
+   */
+  def produceChunkAsyncWithFailures(
+    records: Chunk[ProducerRecord[Array[Byte], Array[Byte]]]
+  ): RIO[Producer, UIO[Chunk[Either[Throwable, RecordMetadata]]]] =
+    ZIO.serviceWithZIO[Producer](_.produceChunkAsyncWithFailures(records))
+
+  /**
    * Accessor method
    */
   def produceChunk(
