@@ -10,6 +10,7 @@ import zio.stream.{ ZPipeline, ZStream }
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.jdk.CollectionConverters._
+import scala.util.control.NonFatal
 
 trait Producer {
 
@@ -438,38 +439,43 @@ private[producer] final class ProducerLive(
     ZStream
       .fromQueueWithShutdown(sendQueue)
       .mapZIO { case (serializedRecords, done) =>
-        ZIO.attempt {
-          val it: Iterator[(ByteRecord, Int)] = serializedRecords.iterator.zipWithIndex
-          val res: Array[Either[Throwable, RecordMetadata]] =
-            new Array[Either[Throwable, RecordMetadata]](serializedRecords.length)
-          val count: AtomicLong = new AtomicLong
-          val length            = serializedRecords.length
+        ZIO.succeed {
+          try {
+            val it: Iterator[(ByteRecord, Int)] = serializedRecords.iterator.zipWithIndex
+            val res: Array[Either[Throwable, RecordMetadata]] =
+              new Array[Either[Throwable, RecordMetadata]](serializedRecords.length)
+            val count: AtomicLong = new AtomicLong
+            val length            = serializedRecords.length
 
-          while (it.hasNext) {
-            val (rec, idx): (ByteRecord, Int) = it.next()
+            while (it.hasNext) {
+              val (rec, idx): (ByteRecord, Int) = it.next()
 
-            val _ = p.send(
-              rec,
-              (metadata: RecordMetadata, err: Exception) =>
-                Unsafe.unsafe { implicit u =>
-                  exec {
-                    if (err != null) res(idx) = Left(err)
-                    else res(idx) = Right(metadata)
+              val _ = p.send(
+                rec,
+                (metadata: RecordMetadata, err: Exception) =>
+                  Unsafe.unsafe { implicit u =>
+                    exec {
+                      if (err != null) res(idx) = Left(err)
+                      else res(idx) = Right(metadata)
 
-                    if (count.incrementAndGet == length) {
-                      exec {
-                        runtime.unsafe.run(done.succeed(Chunk.fromArray(res))).getOrThrowFiberFailure()
+                      if (count.incrementAndGet == length) {
+                        exec {
+                          runtime.unsafe.run(done.succeed(Chunk.fromArray(res))).getOrThrowFiberFailure()
+                        }
                       }
                     }
                   }
+              )
+            }
+          } catch {
+            case NonFatal(e) =>
+              Unsafe.unsafe { implicit u =>
+                exec {
+                  runtime.unsafe.run(done.succeed(Chunk.fill(serializedRecords.size)(Left(e)))).getOrThrowFiberFailure()
                 }
-            )
+              }
           }
         }
-          .foldCauseZIO(
-            cause => ZIO.dieMessage(cause.toString),
-            _ => ZIO.unit
-          ) // TODO how should these failures be represented
       }
       .runDrain
 
